@@ -97,74 +97,109 @@ taxi$pred_occ <- occ_predict
 
 
 
-## DETOUR INDEX ##
+### DETOUR INDEX ###
+# !!!! RUN THE DETOUR INDEX SCRIPT FIRST !!!!
 #Join the detour indices from result_df to the main taxi data, matching based on "VendorID", "tpep_pickup_datetime", "PULocationID" and "DOLocationID". 
 #This would add the detour_distance, detour_duration, and detour_fare columns to the main taxi data
 taxi <- taxi %>%
   left_join(result_df, by = c("VendorID", "tpep_pickup_datetime", "PULocationID", "DOLocationID"))
 
-#Export the taxi data to a stata dta file
-# library(haven)
-# write_dta(taxi, "taxi.dta")
 
 
-
-
-#### DID IMPLEMENTATION ####
+### ESTIMATION PREPARATION ###
 #Make tripID numeric
 taxi <- taxi %>%
-  mutate(tripID = as.numeric(tripID))
-
-#Create a date variable from the drop off date containing the date only
-taxi <- taxi %>%
-  mutate(date = as.Date(tpep_dropoff_datetime))
-
-#Make pred_occ numeric
-taxi <- taxi %>%
-  mutate(pred_occ = as.numeric(pred_occ))
-
-#Make date numeric
-taxi <- taxi %>%
-  mutate(date = as.numeric(date))
-
-#Drop rows where the detour_distance and pred_occ are NA
-taxi <- taxi %>%
-  drop_na(detour_distance, pred_occ)
-
-library(did)
-
-#The following seeks to replicate Table V from the paper
-#We will estimate each column of the table separately to fall in line wit the empirical specification
-
-#Column 1: LGA Distance
-lga_d = att_gt(
-  yname         = "detour_distance",
-  tname         = "date",
-  idname        = "tripID",
-  gname         = "pred_occ",
-  # xformla       = NULL,            # No additional controls in this dataset 
-  control_group = "notyettreated", # Too few groups for "nevertreated" default
-  clustervars   = "tripID", 
-  data          = taxi,
-  panel = FALSE
-)
-
-library(fixest)
-feols(detour_distance ~ pred_occ + treatment + pred_occ*treatment | tripID + tpep_dropoff_datetime, taxi)
-
+  mutate(tripID = as.numeric(tripID),
+         pred_occ = as.numeric(pred_occ))
 
 #Drop duplicates for tripID and dropoff time
 taxi <- taxi %>%
   distinct(tripID, tpep_dropoff_datetime, .keep_all = TRUE)
 
-library(panelView)
-panelview(detour_distance ~ treatment, data = taxi, display.all = FALSE, 
-          index = c("tripID","tpep_dropoff_datetime"), xlab = "Date", ylab = "Trip ID",
-          axis.lab.gap = c(0,1), by.timing = TRUE)
+#Create a date variable as a categorical variable denoting the day out of the entire data period (1,2,3,etc)
+# taxi <- taxi %>%
+#   mutate(date = as.numeric(as.Date(tpep_pickup_datetime) - as.Date("2011-01-01")))
+
+#Create a date variable from the datetime of dropoff
+taxi <- taxi %>%
+  mutate(date = as.Date(tpep_dropoff_datetime))
 
 
+#Export the taxi data to a stata dta file
+# library(haven)
+# write_dta(taxi, "taxi.dta")
+
+#Drop records where the detour distance, detour duration, or detour fare are in the lowest 1% or highest 1% of their respective distributions
+#This is done to remove outliers, excluding NaN values
+taxi <- taxi %>%
+  filter(detour_distance > quantile(detour_distance, 0.01, na.rm = TRUE) & detour_distance < quantile(detour_distance, 0.99, na.rm = TRUE)) %>%
+  filter(detour_duration > quantile(detour_duration, 0.01, na.rm = TRUE) & detour_duration < quantile(detour_duration, 0.99, na.rm = TRUE)) %>%
+  filter(detour_fare > quantile(detour_fare, 0.01, na.rm = TRUE) & detour_fare < quantile(detour_fare, 0.99, na.rm = TRUE))
 
 
+#### "DiD" IMPLEMENTATION ####
+#The following seeks to replicate Table V from the paper
+#We will estimate each column of the table separately to fall in line wit the empirical specification
+library(fixest)
+
+# Column 1: LGA Distance
+lga_d <- taxi %>%
+  filter(PULocationID == 138) %>%
+  feols(detour_distance ~  pred_occ + treatment + treatment*pred_occ | tripID + date, 
+        cluster = "tripID")
+
+# summary(lga_d)
+
+# Column 2: LGA Duration
+lga_t <- taxi %>%
+  filter(PULocationID == 138) %>%
+  feols(detour_duration ~  pred_occ + treatment + treatment*pred_occ | tripID + date, 
+        cluster = "tripID")
+
+# summary(lga_t)
+
+# Column 3: LGA Fare
+lga_f <- taxi %>%
+  filter(PULocationID == 138) %>%
+  feols(detour_fare ~  pred_occ + treatment + treatment*pred_occ | tripID + date, 
+        cluster = "tripID")
+
+# summary(lga_f)
+
+# Column 4: JFK Distance
+jfk_d <- taxi %>%
+  filter(PULocationID == 132) %>%
+  feols(detour_distance ~  pred_occ + treatment + treatment*pred_occ | tripID + date, 
+        cluster = "tripID")
+
+# summary(jfk_d)
+
+# Column 5: JFK Duration
+jfk_t <- taxi %>%
+  filter(PULocationID == 132) %>%
+  feols(detour_duration ~ pred_occ + treatment + treatment*pred_occ | tripID + date, 
+        cluster = "tripID")
+
+# summary(jfk_t)
+
+#Export
+myDict <- c("pred_occ" = "occ",
+            "treatment" = "g",
+            "treatment:pred_occ" = "g x occ",
+            "detour_distance" = "Distance",
+            "detour_duration" = "Duration",
+            "detour_fare" = "Fare",
+            "tripID" = "Trip Unit",
+            "date" = "Date")
+
+etable(lga_d, lga_t, lga_f, jfk_d, jfk_t, 
+       dict = myDict,
+       title = "Estimations Results of Equation (1)",
+       headers = c("LGA Distance", "LGA Duration", "LGA Fare", "JFK Distance", "JFK Duration"),
+       # file = "tableV.tex",
+       replace = TRUE,
+       view = TRUE,
+       depvar = FALSE)
 
 
 
