@@ -10,7 +10,8 @@ library(data.table)
 
 #First, we read the parquet file into R
 library(arrow)
-taxi <- read_parquet("sample_data.parquet")
+# taxi <- read_parquet("sample_data.parquet")
+taxi <- read_parquet("sample_data_big.parquet")
 
 # Create a new variable to identify residential or hotel trips
 taxi <- taxi %>%
