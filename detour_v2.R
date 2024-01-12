@@ -51,7 +51,7 @@ result_df <- bind_rows(detour_indexes)
 #### Index Stats ####
 
 #View the mean of each detour index based on pickup location
-result_df %>%
+detour_summary <- result_df %>%
   filter(!is.na(detour_distance) & !is.na(detour_duration) & !is.na(detour_fare)) %>%
   group_by(PULocationID) %>%
   summarise(
@@ -59,4 +59,17 @@ result_df %>%
     avg_detour_duration = mean(detour_duration),
     avg_detour_fare = mean(detour_fare)
   )
+
+#Rename PUlocationID to Airport
+detour_summary <- detour_summary %>%
+  rename(Airport = PULocationID)
+
+#Change Airport values to JK and LGA
+detour_summary$Airport[detour_summary$Airport == 132] <- "JFK"
+detour_summary$Airport[detour_summary$Airport == 138] <- "LGA"
+
+detour_summary %>%
+  kbl(caption = "Table IV: Mean Detours by Airport") %>%
+  kable_classic(full_width = F, html_font = "Georgia")
+
 

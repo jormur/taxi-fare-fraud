@@ -138,6 +138,8 @@ taxi <- taxi %>%
   filter(detour_fare > quantile(detour_fare, 0.01, na.rm = TRUE) & detour_fare < quantile(detour_fare, 0.99, na.rm = TRUE))
 
 
+
+
 #### "DiD" IMPLEMENTATION ####
 #The following seeks to replicate Table V from the paper
 #We will estimate each column of the table separately to fall in line wit the empirical specification
@@ -183,6 +185,8 @@ jfk_t <- taxi %>%
 
 # summary(jfk_t)
 
+models <- list(lga_d, lga_t, lga_f, jfk_d, jfk_t)
+
 #Export
 myDict <- c("pred_occ" = "occ",
             "treatment" = "g",
@@ -191,18 +195,86 @@ myDict <- c("pred_occ" = "occ",
             "detour_duration" = "Duration",
             "detour_fare" = "Fare",
             "tripID" = "Trip Unit",
-            "date" = "Date")
+            "date" = "Date",
+            "PULocationID" = "Pickup Location",
+            "DOLocationID" = "Dropoff Location",
+            "tip_amount" = "Tip Amount",
+            "local" = "Local dummy",
+            "fare_amount" = "Fare Amount",
+            "trip_distance" = "Trip Distance",
+            "trip_duration" = "Trip Duration",
+            "passenger_count" = "Passenger Count",
+            "hour_of_day_by_day_of_week" = "Hour of Week")
 
 etable(lga_d, lga_t, lga_f, jfk_d, jfk_t, 
        dict = myDict,
        title = "Estimations Results of Equation (1)",
        headers = c("LGA Distance", "LGA Duration", "LGA Fare", "JFK Distance", "JFK Duration"),
        # file = "tableV.tex",
-       replace = TRUE,
+       # replace = TRUE,
        view = TRUE,
        depvar = FALSE)
 
 
 
 
+########### EXTENSION ############
+#Create a dummy variable for whether the trip is done by a local
+taxi <- taxi %>%
+  mutate(local = ifelse(DOLocationID == 229, 1, 0))
 
+#OLS
+# Column 1: LGA
+ols_lga <- taxi %>%
+  filter(PULocationID == 138) %>%
+  lm(tip_amount ~ local + trip_duration + trip_distance + fare_amount + passenger_count, data = .)
+
+# Column 2: JFK
+ols_jfk <- taxi %>%
+  filter(PULocationID == 132) %>%
+  lm(tip_amount ~ local + trip_duration + trip_distance + fare_amount + passenger_count, data = .)
+
+#PLM
+library(plm)
+
+# Column 3: LGA
+plm_lga <- taxi %>%
+  filter(PULocationID == 138) %>%
+  plm(tip_amount ~ local + trip_duration + trip_distance + fare_amount + passenger_count + hour_of_day_by_day_of_week, data = ., index = c("date"), model = "within")
+
+# Column 4: JFK
+plm_jfk <- taxi %>%
+  filter(PULocationID == 132) %>%
+  plm(tip_amount ~ local + trip_duration + trip_distance + fare_amount + passenger_count + hour_of_day_by_day_of_week, data = ., index = c("date"), model = "within")
+
+#TWFE
+library(estimatr)
+
+# Column 5: LGA
+twfe_lga <- taxi %>%
+  filter(PULocationID == 138) %>%
+  lm_robust(tip_amount ~ local + trip_duration + trip_distance + fare_amount + passenger_count + hour_of_day_by_day_of_week,
+            fixed_effects = ~ date,
+            data = .,
+            se_type = "stata")
+
+# Column 6: JFK
+twfe_jfk <- taxi %>%
+  filter(PULocationID == 132) %>%
+  lm_robust(tip_amount ~ local + trip_duration + trip_distance + fare_amount + passenger_count + hour_of_day_by_day_of_week,
+            fixed_effects = ~ date,
+            data = .,
+            se_type = "stata")
+
+model_ext <- list("LGA OLS" = ols_lga, "JKF OLS" = ols_jfk, "LGA PLM" = plm_lga,
+                  "JFK PLM" = plm_jfk, "LGA TWFE" = twfe_lga, "JFK TWFE" = twfe_jfk)
+
+#Table Export
+library(modelsummary)
+library(kableExtra)
+modelsummary(model_ext, 
+             stars = TRUE,
+             coef_map = myDict,
+             title = "Estimations Results of Equation (2) with Robustiness Checks",
+             output = "ext_results.tex"
+)
